@@ -1,6 +1,7 @@
-// server.js
-import express from "express";
-import cors from "cors";
+import 'dotenv/config'
+import express from 'express'
+import cors from 'cors'
+import fetch from 'node-fetch'
 
 const app = express();
 app.use(cors());
@@ -32,17 +33,38 @@ async function createChatKitSession() {
   return { client_secret: data.client_secret, expires_at: data.expires_at };
 }
 
-app.post("/api/chatkit/start", async (_req, res) => {
-  console.log("[HTTP] POST /api/chatkit/start");
-  try { res.json(await createChatKitSession()); }
-  catch (e) { console.error("START error:", e); res.status(500).json({ error: "Failed to start ChatKit session" }); }
-});
+app.post('/api/chatkit/start', async (req, res) => {
+  const r = await fetch('https://api.openai.com/v1/chatkit/sessions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ workflow: { id: WORKFLOW_ID } })
+  })
+  const data = await r.json()
+  if (!r.ok) return res.status(r.status).json(data)
+  return res.json({ client_secret: data.client_secret })
+})
 
-app.post("/api/chatkit/refresh", async (_req, res) => {
-  console.log("[HTTP] POST /api/chatkit/refresh");
-  try { res.json(await createChatKitSession()); }
-  catch (e) { console.error("REFRESH error:", e); res.status(500).json({ error: "Failed to refresh ChatKit session" }); }
-});
+// 2) REFRESH: exchange the current secret for a new one and return only the client_secret
+app.post('/api/chatkit/refresh', async (req, res) => {
+  const { currentClientSecret } = req.body || {}
+  const r = await fetch('https://api.openai.com/v1/chatkit/sessions/refresh', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ client_secret: currentClientSecret })
+  })
+  const data = await r.json()
+  if (!r.ok) return res.status(r.status).json(data)
+  return res.json({ client_secret: data.client_secret })
+})
+
+const port = process.env.PORT || 8787
+app.listen(port, () => console.log(`ChatKit token server on :${port}`))
 
 // Diagnostics
 app.get("/diag/sessions", async (_req, res) => {
