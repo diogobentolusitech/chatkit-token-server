@@ -45,9 +45,55 @@ app.post("/api/chatkit/refresh", async (_req, res) => {
 });
 
 // Diagnostics
-app.get("/version", (_req, res) => res.json({ build: process.env.RENDER_GIT_COMMIT || "local" }));
-app.get("/flavor", (_req, res) => res.send("sessions")); // should say "sessions"
-app.get("/", (_req, res) => res.send("ChatKit token server is up"));
+app.get("/diag/sessions", async (_req, res) => {
+  try {
+    const r = await fetch("https://api.openai.com/v1/chatkit/sessions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+        "OpenAI-Beta": "chatkit_beta=v1",
+      },
+      body: JSON.stringify({
+        user: "diag-" + Math.random().toString(36).slice(2),
+        workflow: { id: WORKFLOW_ID },
+      }),
+    });
+    const data = await r.json();
+    res.status(r.status).json({
+      upstream_status: r.status,
+      token_prefix: (data.client_secret || "").slice(0, 4),
+      sample: (data.client_secret || "").slice(0, 12) || null,
+      raw: data,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/diag/realtime", async (_req, res) => {
+  try {
+    const r = await fetch("https://api.openai.com/v1/realtime/sessions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-realtime-preview-2024-12-17"
+      }),
+    });
+    const data = await r.json();
+    res.status(r.status).json({
+      upstream_status: r.status,
+      token_prefix: (data.client_secret || "").slice(0, 4),
+      sample: (data.client_secret || "").slice(0, 12) || null,
+      raw: data,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 app.listen(process.env.PORT || 8787, () => {
   console.log("ChatKit token server listening");
