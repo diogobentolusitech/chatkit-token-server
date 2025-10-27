@@ -1,58 +1,56 @@
 // server.js
 import express from "express";
 import cors from "cors";
-import fetch from "node-fetch";
 
 const app = express();
-app.use(cors());               // keep this for now
+app.use(cors());
 app.use(express.json());
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-// Set this in Render → Environment: CHATKIT_WORKFLOW_ID=wf_xxx from Agent Builder
-const WORKFLOW_ID = process.env.CHATKIT_WORKFLOW_ID;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;          // set in Render
+const WORKFLOW_ID    = process.env.CHATKIT_WORKFLOW_ID;     // wf_... from Agent Builder
 
-// 1) Create a session → returns { client_secret: "cks_...", expires_at: ... }
-app.post("/api/chatkit/start", async (req, res) => {
+// Helper: create a ChatKit session (returns cks_...)
+async function createChatKitSession() {
+  const res = await fetch("https://api.openai.com/v1/chatkit/sessions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+      "OpenAI-Beta": "chatkit_beta=v1", // REQUIRED
+    },
+    body: JSON.stringify({
+      user: "anon-" + Math.random().toString(36).slice(2),
+      workflow: { id: WORKFLOW_ID }, // must be your wf_...
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(`OpenAI ${res.status}: ${JSON.stringify(data)}`);
+  }
+  // data contains { client_secret: "cks_...", expires_at: ... }
+  return { client_secret: data.client_secret, expires_at: data.expires_at };
+}
+
+app.post("/api/chatkit/start", async (_req, res) => {
   try {
-    const r = await fetch("https://api.openai.com/v1/chatkit/sessions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-        "OpenAI-Beta": "chatkit_beta=v1"
-      },
-      body: JSON.stringify({
-        user: "anon-" + Math.random().toString(36).slice(2),
-        workflow: { id: WORKFLOW_ID }
-      })
-    });
-    const data = await r.json();
-    if (!r.ok) return res.status(r.status).json(data);
-    // Return exactly what the ChatKit docs expect:
-    res.json({ client_secret: data.client_secret, expires_at: data.expires_at });
+    const session = await createChatKitSession();
+    res.json(session);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error("START error:", e);
+    res.status(500).json({ error: "Failed to start ChatKit session" });
   }
 });
 
-// 2) Refresh a session when the widget asks
 app.post("/api/chatkit/refresh", async (req, res) => {
   try {
-    const { currentClientSecret } = req.body || {};
-    const r = await fetch("https://api.openai.com/v1/chatkit/sessions/refresh", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-        "OpenAI-Beta": "chatkit_beta=v1"
-      },
-      body: JSON.stringify({ client_secret: currentClientSecret })
-    });
-    const data = await r.json();
-    if (!r.ok) return res.status(r.status).json(data);
-    res.json({ client_secret: data.client_secret, expires_at: data.expires_at });
+    // EITHER call a refresh endpoint if/when exposed
+    // OR simply mint a new session (works fine):
+    const session = await createChatKitSession();
+    res.json(session);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error("REFRESH error:", e);
+    res.status(500).json({ error: "Failed to refresh ChatKit session" });
   }
 });
 
