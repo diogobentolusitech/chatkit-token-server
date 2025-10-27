@@ -1,65 +1,62 @@
-import 'dotenv/config';
-import express from 'express';
-import cors from 'cors';
+// server.js
+import express from "express";
+import cors from "cors";
+import fetch from "node-fetch";
 
 const app = express();
-app.use(cors());
+app.use(cors());               // keep this for now
 app.use(express.json());
 
-const API_BASE = 'https://api.openai.com/v1';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+// Set this in Render → Environment: CHATKIT_WORKFLOW_ID=wf_xxx from Agent Builder
 const WORKFLOW_ID = process.env.CHATKIT_WORKFLOW_ID;
 
-// small helper: call OpenAI Sessions API
-async function createChatKitSession() {
-  const res = await fetch(`${API_BASE}/chatkit/sessions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
-      // This header is required for the ChatKit beta endpoints
-      'OpenAI-Beta': 'chatkit_beta=v1',
-    },
-    body: JSON.stringify({
-      workflow: { id: WORKFLOW_ID },
-      // Optional: pass a stable user id if you have one; random is fine
-      user: crypto.randomUUID(),
-    }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`OpenAI error ${res.status}: ${text}`);
-  }
-
-  // API returns an object with client_secret and expires_at (and more)
-  return res.json();
-}
-
-// Start: mint a NEW short-lived client_secret
-app.post('/api/chatkit/start', async (_req, res) => {
+// 1) Create a session → returns { client_secret: "cks_...", expires_at: ... }
+app.post("/api/chatkit/start", async (req, res) => {
   try {
-    const session = await createChatKitSession();
-    // Return just what the widget needs
-    res.json({ client_secret: session.client_secret, expires_at: session.expires_at });
-  } catch (err) {
-    console.error('START failed:', err);
-    res.status(500).json({ error: 'Failed to start ChatKit session' });
+    const r = await fetch("https://api.openai.com/v1/chatkit/sessions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+        "OpenAI-Beta": "chatkit_beta=v1"
+      },
+      body: JSON.stringify({
+        user: "anon-" + Math.random().toString(36).slice(2),
+        workflow: { id: WORKFLOW_ID }
+      })
+    });
+    const data = await r.json();
+    if (!r.ok) return res.status(r.status).json(data);
+    // Return exactly what the ChatKit docs expect:
+    res.json({ client_secret: data.client_secret, expires_at: data.expires_at });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// Refresh: simplest approach is to mint a NEW session (works fine)
-app.post('/api/chatkit/refresh', async (_req, res) => {
+// 2) Refresh a session when the widget asks
+app.post("/api/chatkit/refresh", async (req, res) => {
   try {
-    const session = await createChatKitSession();
-    res.json({ client_secret: session.client_secret, expires_at: session.expires_at });
-  } catch (err) {
-    console.error('REFRESH failed:', err);
-    res.status(500).json({ error: 'Failed to refresh ChatKit session' });
+    const { currentClientSecret } = req.body || {};
+    const r = await fetch("https://api.openai.com/v1/chatkit/sessions/refresh", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+        "OpenAI-Beta": "chatkit_beta=v1"
+      },
+      body: JSON.stringify({ client_secret: currentClientSecret })
+    });
+    const data = await r.json();
+    if (!r.ok) return res.status(r.status).json(data);
+    res.json({ client_secret: data.client_secret, expires_at: data.expires_at });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-const PORT = process.env.PORT || 8787;
-app.listen(PORT, () => {
-  console.log(`ChatKit token server listening on http://localhost:${PORT}`);
+app.get("/", (_req, res) => res.send("ChatKit token server is up"));
+app.listen(process.env.PORT || 8787, () => {
+  console.log("ChatKit token server listening");
 });
