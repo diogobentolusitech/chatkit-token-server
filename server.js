@@ -7,46 +7,48 @@ app.use(cors());
 app.use(express.json());
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const WORKFLOW_ID = process.env.CHATKIT_WORKFLOW_ID;
+const WORKFLOW_ID    = process.env.CHATKIT_WORKFLOW_ID;
+
+console.log("[BOOT] Using ChatKit Sessions API (should return cks_ tokens)");
+console.log("[BOOT] WORKFLOW_ID =", WORKFLOW_ID);
 
 async function createChatKitSession() {
-  const res = await fetch("https://api.openai.com/v1/chatkit/sessions", {
+  console.log("[SESSIONS] Creating ChatKit session via /v1/chatkit/sessions");
+  const r = await fetch("https://api.openai.com/v1/chatkit/sessions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${OPENAI_API_KEY}`,
       "Content-Type": "application/json",
-      "OpenAI-Beta": "chatkit_beta=v1"
+      "OpenAI-Beta": "chatkit_beta=v1",
     },
     body: JSON.stringify({
       user: "anon-" + Math.random().toString(36).slice(2),
-      workflow: { id: WORKFLOW_ID }
-    })
+      workflow: { id: WORKFLOW_ID },
+    }),
   });
-
-  const data = await res.json();
-  if (!res.ok) throw new Error(`OpenAI ${res.status}: ${JSON.stringify(data)}`);
+  const data = await r.json();
+  console.log("[SESSIONS] OpenAI status:", r.status);
+  if (!r.ok) throw new Error(`OpenAI ${r.status}: ${JSON.stringify(data)}`);
   return { client_secret: data.client_secret, expires_at: data.expires_at };
 }
 
 app.post("/api/chatkit/start", async (_req, res) => {
-  try {
-    const session = await createChatKitSession();
-    res.json(session);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  console.log("[HTTP] POST /api/chatkit/start");
+  try { res.json(await createChatKitSession()); }
+  catch (e) { console.error("START error:", e); res.status(500).json({ error: "Failed to start ChatKit session" }); }
 });
 
 app.post("/api/chatkit/refresh", async (_req, res) => {
-  try {
-    const session = await createChatKitSession();
-    res.json(session);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  console.log("[HTTP] POST /api/chatkit/refresh");
+  try { res.json(await createChatKitSession()); }
+  catch (e) { console.error("REFRESH error:", e); res.status(500).json({ error: "Failed to refresh ChatKit session" }); }
 });
 
+// Diagnostics
+app.get("/version", (_req, res) => res.json({ build: process.env.RENDER_GIT_COMMIT || "local" }));
+app.get("/flavor", (_req, res) => res.send("sessions")); // should say "sessions"
 app.get("/", (_req, res) => res.send("ChatKit token server is up"));
+
 app.listen(process.env.PORT || 8787, () => {
   console.log("ChatKit token server listening");
 });
